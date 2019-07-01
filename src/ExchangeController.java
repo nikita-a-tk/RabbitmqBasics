@@ -1,5 +1,6 @@
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 
 public class ExchangeController {
     private static RabbitMqOperator operator;
@@ -31,6 +32,7 @@ public class ExchangeController {
                     break;
                 case '9':
                     System.out.println("Exiting");
+                    operator.close();
                     break;
                 default:
                     System.out.println("Wrong option!");
@@ -45,44 +47,39 @@ public class ExchangeController {
         System.out.println("---------------------------");
         if (exchanges.size() > 0) {
             System.out.println("Please find the list of Exchanges below:");
-            System.out.println("Name - Type");
-            for (int i = 0; i < exchanges.size(); i++) {
-                String name = exchanges.get(i)[0];
-                String type = exchanges.get(i)[1];
-                System.out.println(String.format("[%d] %s - %s", i, name, type));
+            System.out.println("[num] Name - Type");
+            int i = 1;
+            for (String[] exchange : exchanges) {
+                System.out.println(String.format("[%d] %s - %s", i++, exchange[0], exchange[1]));
             }
         } else {
             System.out.println("There are no exchanges");
         }
     }
 
-    private static void postMessage() {
-        printExchanges();
-        System.out.println("Choose to which exchange you want to post a message");
+    private static void postMessage() throws IOException {
 
+        int choice = -1;
 
         ArrayList<String[]> exchanges = operator.getExchanges();
-        int choice = 0;
-        String name = exchanges.get(choice)[0];
-        String type = exchanges.get(choice)[1];
-        try {
-            operator.publishMessage(name, type,"my_own_severity", "Test message");
 
-        } catch (IOException exc) {
-            exc.printStackTrace();
+        while (choice != 8) {
+            printExchanges();
+            System.out.println("[9] To Main Menu");
+            System.out.println("Choose to which exchange you want to post a message");
+
+            choice = System.in.read() - '1'; // choice begins from 1
+            System.in.skip(System.in.available()); // to skip spare characters
+
+            if (choice >= 0 && choice < exchanges.size()) {
+                String[] exchange = exchanges.get(choice);
+                System.out.println(Arrays.toString(exchange));
+
+                operator.sendMessage(exchange[0], exchange[1]);
+            } else if (choice != 8) {
+                System.out.println("Please choose a valid exchange");
+            }
         }
-
-
-
-        choice = 3;
-        name = exchanges.get(choice)[0];
-        type = exchanges.get(choice)[1];
-        try {
-            operator.publishMessage(name, type,"info", "Test info message");
-
-        } catch (IOException exc) {
-            exc.printStackTrace();
-        }
-
+        System.out.println("To Main Menu");
     }
 }

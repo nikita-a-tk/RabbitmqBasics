@@ -4,10 +4,14 @@ import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.net.Authenticator;
 import java.net.HttpURLConnection;
 import java.net.PasswordAuthentication;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.sql.Timestamp;
+import java.text.SimpleDateFormat;
 import java.util.*;
 
 public class RabbitMqOperator {
@@ -38,11 +42,34 @@ public class RabbitMqOperator {
         listQueues();
     }
 
-    public void publishMessage(String exchangeName, String exchangeType, String routingKey, String message) throws IOException {
+    private void publishMessage(String exchangeName, String exchangeType, String routingKey, String message) throws IOException {
         channel.exchangeDeclare(exchangeName, exchangeType);
         channel.basicPublish(exchangeName, routingKey, null, message.getBytes());
+        System.out.println(" [x] Sent '" + routingKey + ": " + message + "'");
+    }
 
-        System.out.println(" [x] Sent '" + message + "'");
+    public void sendMessage(String exchangeName, String exchangeType) throws IOException {
+        channel.exchangeDeclare(exchangeName, exchangeType);
+
+        String message;
+        switch (exchangeType) {
+            case "direct":
+                message = new SimpleDateFormat("HH.mm.ss.S").format(new Timestamp(System.currentTimeMillis())) + " - Direct Message CATS";
+                publishMessage(exchangeName, exchangeType, "cats_are_awesome", message);
+                break;
+            case "topic":
+                message = new SimpleDateFormat("HH.mm.ss.S").format(new Timestamp(System.currentTimeMillis())) + " - Topic Message PUPPY";
+                publishMessage(exchangeName, exchangeType, "puppy", message);
+                message = new SimpleDateFormat("HH.mm.ss.S").format(new Timestamp(System.currentTimeMillis())) + " - Topic Message PUPPY CORGI";
+                publishMessage(exchangeName, exchangeType, "puppy corgi", message);
+                break;
+            case "headers":
+                message = new SimpleDateFormat("HH.mm.ss.S").format(new Timestamp(System.currentTimeMillis())) + " - Headers Message ALPACA";
+                publishMessage(exchangeName, exchangeType, "brown.alpaca.runs", message);
+                message = new SimpleDateFormat("HH.mm.ss.S").format(new Timestamp(System.currentTimeMillis())) + " - Headers Message BEAR";
+                publishMessage(exchangeName, exchangeType, "brown.siberian.bear.roars", message);
+                break;
+        }
     }
 
     private void listExchanges() {
@@ -60,8 +87,8 @@ public class RabbitMqOperator {
                     type = splittedJson[i + 1].replace("\"", "");
                 }
 
-                String[] exchange = {name, type};
                 if (name != null && type != null) {
+                    String[] exchange = {name, type};
                     exchanges.add(exchange);
                     name = null;
                     type = null;
@@ -86,16 +113,14 @@ public class RabbitMqOperator {
         channel.exchangeDeclare("my_own_direct_exchange", BuiltinExchangeType.DIRECT);
         channel.exchangeDeclare("my_own_headers_exchange", BuiltinExchangeType.HEADERS);
         channel.exchangeDeclare("my_own_topic_exchange", BuiltinExchangeType.TOPIC);
-        channel.exchangeDeclare("my_own_fanout_exchange", BuiltinExchangeType.FANOUT);
     }
 
     private void bindQueuesExchanges() throws IOException {
-        channel.queueBind("my_own_direct_queue", "my_own_direct_exchange", "my_own_severity");
-        channel.queueBind("my_own_direct_queue", "my_own_direct_exchange", "my_own_severity");
-        channel.queueBind("my_own_headers0_queue", "my_own_headers_exchange", "*.own.*");
-        channel.queueBind("my_own_headers0_queue", "my_own_headers_exchange", "my.#");
-        channel.queueBind("my_own_topic0_queue", "my_own_topic_exchange", "info");
-        channel.queueBind("my_own_topic1_queue", "my_own_topic_exchange", "info warning");
+        channel.queueBind("my_own_direct_queue", "my_own_direct_exchange", "cats_are_awesome");
+        channel.queueBind("my_own_headers0_queue", "my_own_headers_exchange", "*.alpaca.*");
+        channel.queueBind("my_own_headers0_queue", "my_own_headers_exchange", "brown.#");
+        channel.queueBind("my_own_topic0_queue", "my_own_topic_exchange", "puppy");
+        channel.queueBind("my_own_topic1_queue", "my_own_topic_exchange", "puppy corgi");
     }
 
     public ArrayList<String[]> getExchanges() {
@@ -165,7 +190,97 @@ public class RabbitMqOperator {
         return null;
     }
 
-    private String makePostRequest(String requestPath, String Body) {
+    public ArrayList<String[]> getQueueContent(String queueName) {
+
+        String resultJson = makePostRequest("http://localhost:15672/api/queues/%2F/" + queueName + "/get",
+                "count=5&ackmode=ack_requeue_true&encoding=auto&truncate=50000");
+
+        ArrayList<String[]> messages = parseQueuesJson(resultJson);
+
+        return messages;
+    }
+
+    private String makePostRequest(String requestPath, String requestBody) {
+        try {
+            URL url = new URL(requestPath);
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+
+            connection.setDoOutput(true);
+            connection.setRequestMethod("POST");
+
+            Authenticator.setDefault(new Authenticator() {
+                protected PasswordAuthentication getPasswordAuthentication() {
+                    return new PasswordAuthentication("guest", "guest".toCharArray());
+                }
+            });
+
+            byte[] out = "{\"count\":5,\"ackmode\":\"ack_requeue_true\",\"encoding\":\"auto\",\"truncate\":50000}" .getBytes(StandardCharsets.UTF_8);
+            int length = out.length;
+
+            connection.setFixedLengthStreamingMode(length);
+            connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+            connection.connect();
+            try(OutputStream os = connection.getOutputStream()) {
+                os.write(out);
+            }
+
+            connection.connect();
+            int responseCode = connection.getResponseCode();
+
+            if (responseCode != 200) {
+                throw new RuntimeException("HttpResponseCode: " + responseCode);
+            } else {
+                Scanner scanner = new Scanner(connection.getInputStream());
+                String resultJson = new String();
+                while (scanner.hasNext()) {
+                    resultJson += scanner.nextLine();
+                }
+                scanner.close();
+
+                return resultJson;
+            }
+        } catch (Exception exc) {
+            exc.printStackTrace();
+        }
+
         return null;
+    }
+
+    private ArrayList<String[]> parseQueuesJson(String json) {
+        ArrayList<String[]> messages = new ArrayList<>();
+
+        String[] splittedJson = json.split(":|,");
+        String exchange = null;
+        String routingKey = null;
+        String text = null;
+        for (int i = 0; i < splittedJson.length - 1; i++) {
+            if (splittedJson[i].contains("exchange") && splittedJson[i + 1].contains("my_own")) {
+                exchange = splittedJson[i + 1].replace("\"", "");
+            } else if (splittedJson[i].contains("routing_key")) {
+                routingKey = splittedJson[i + 1].replace("\"", "");
+            } else if (splittedJson[i].contains("payload") && !splittedJson[i].contains("bytes") && !splittedJson[i].contains("encoding")) {
+                text = splittedJson[i + 1].replace("\"", "");
+            }
+
+            if (exchange != null && routingKey != null && text != null) {
+                String[] message = {exchange, routingKey, text};
+                messages.add(message);
+                exchange = null;
+                routingKey = null;
+                text = null;
+                i++;
+            }
+        }
+
+        return messages;
+    }
+
+    public void close() {
+        try {
+            channel.close();
+            connection.close();
+        } catch (Exception exc) {
+            exc.printStackTrace();
+        }
     }
 }
